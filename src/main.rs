@@ -1,6 +1,8 @@
+use std::time::Duration;
+
 use anyhow::anyhow;
 use async_trait::async_trait;
-use pingora::server::Server;
+use pingora::{listeners::TcpSocketOptions, protocols::TcpKeepalive, server::Server};
 use pingora_core::{prelude::HttpPeer, Result};
 use pingora_proxy::{http_proxy_service, ProxyHttp, Session};
 
@@ -29,8 +31,20 @@ fn main() -> anyhow::Result<()> {
     env_logger::init();
     let mut server = Server::new(None).map_err(|err| anyhow!(err))?;
     let mut proxy = http_proxy_service(&server.configuration, ReverseProxy);
+    proxy.threads = Some(4);
 
-    proxy.add_tcp("0.0.0.0:6188");
+    let keep_alive = TcpKeepalive {
+        count: 16384, // using an arbitary large number for probe count. might need to be bigger
+        idle: Duration::from_secs(60 * 60 * 24), // using 24 hours for now
+        interval: Duration::from_millis(5), // do a probe every 5ms
+    };
+
+    let mut tcp_settings = TcpSocketOptions::default();
+    tcp_settings.ipv6_only = Some(false);
+    tcp_settings.tcp_keepalive = Some(keep_alive);
+
+    proxy.add_tcp_with_settings("0.0.0.0:6188", tcp_settings);
+    // proxy.add_tcp();
     server.add_service(proxy);
     server.run_forever();
 }
